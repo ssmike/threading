@@ -4,17 +4,18 @@ use std::thread;
 
 #[test]
 fn check_work() {
+    let test_val = 5;
     let (tx, rx) = channel();
     let promise = {
-        let a = Promise::new();
+        let (promise, future) = Promise::new();
         let tx = tx.clone();
-        a.future().then(move |x| {
+        future.then(move |x| {
             tx.send(*x).unwrap();
         });
-        a
+        promise
     };
     thread::spawn(move || {
-        promise.set_value(5);
+        promise.set(test_val);
     });
-    assert_eq!(rx.recv().unwrap(), 5);
+    assert_eq!(rx.recv().unwrap(), test_val);
 }

@@ -1,5 +1,5 @@
 use std::option::Option;
-use std::boxed::Box;
+use std::boxed::{Box, FnBox};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc};
 use std::mem;
@@ -43,7 +43,7 @@ impl<T> Spinlock<T> {
 
 struct FutureState<'t, T> {
     value: Option<T>,
-    callbacks: Vec<Box<'t + Fn(&T) -> ()>>
+    callbacks: Vec<Box<'t + FnBox(&T) -> ()>>
 }
 
 impl<'t, T> FutureState<'t, T> {
@@ -71,7 +71,7 @@ pub struct Future<'t, T> {
 
 unsafe impl<'t, T> Send for Future<'t, T> {}
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct Promise<'t, T> {
     state: Arc<Spinlock<FutureState<'t, T>>>
 }
@@ -79,30 +79,23 @@ pub struct Promise<'t, T> {
 unsafe impl<'t, T> Send for Promise<'t, T> {}
 
 impl<'t, T> Promise<'t, T> {
-    pub fn new() -> Promise<'t, T> {
-        Promise {
-            state: Arc::new(Spinlock::new(FutureState::default()))
-        }
+    pub fn new() -> (Promise<'t, T>, Future<'t, T>) {
+        let state = Arc::new(Spinlock::new(FutureState::default()));
+        (Promise{state:state.clone()}, Future{state:state})
     }
 
-    pub fn future(self: &Promise<'t, T>) -> Future<'t, T> {
-        Future {
-            state: self.state.clone()
-        }
-    }
-
-    pub fn set_value(self: &Promise<'t, T>, value: T) {
+    pub fn set(self: Promise<'t, T>, value: T) {
         let callbacks = {
             let (ref mut state, _) = self.state.lock();
             state.value = Option::Some(value);
-            let mut vec = Vec::<Box<Fn(&T) -> ()>>::new();
+            let mut vec = Vec::<Box<FnBox(&T) -> ()>>::new();
             mem::swap(&mut vec, &mut state.callbacks);
             vec
         };
         let state = unsafe { self.state.get() };
         let value = state.value.as_ref().unwrap();
         callbacks.into_iter().for_each(|f| {
-            f(value);
+            FnBox::call_box(f, (value,));
         });
     }
 }
@@ -114,14 +107,13 @@ impl<'t, T> Future<'t, T> {
         }
     }
 
-    pub fn then<R: 't, Func: 't + Fn(&T) -> R>(self: &Future<'t, T>, f: Func) -> Future<'t, R> {
-        let to_set = Promise::new();
-        let res = to_set.future();
-        self.subscribe(move |x| {to_set.set_value(f(x));});
-        res
+    pub fn then<R: 't, Func: 't + FnOnce(&T) -> R>(self: &Future<'t, T>, f: Func) -> Future<'t, R> {
+        let (promise, future) = Promise::new();
+        self.subscribe(move |x| {promise.set(f(x));});
+        future
     }
 
-    fn subscribe<Func: 't + Fn(&T) -> ()>(self: &Future<'t, T>, f: Func) {
+    fn subscribe<Func: 't + FnOnce(&T) -> ()>(self: &Future<'t, T>, f: Func) {
         let (state, guard) = self.state.lock();
         match state.value {
             None => {
