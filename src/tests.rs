@@ -1,11 +1,17 @@
 use future::Promise;
+use std::sync::mpsc::channel;
 
 #[test]
 fn check_work() {
-    let a = Promise::new();
-    a.future().then(|x| {
-        assert_eq!(*x, 4);
-        println!("value is {}", x);
-    });
-    a.set_value(4);
+    let (tx, rx) = channel();
+    let promise = {
+        let a = Promise::new();
+        let tx = tx.clone();
+        a.future().then(move |x| {
+            tx.send(*x).unwrap();
+        });
+        a
+    };
+    promise.set_value(5);
+    assert_eq!(rx.recv().unwrap(), 5);
 }

@@ -41,13 +41,13 @@ impl<T> Spinlock<T> {
     }
 }
 
-struct FutureState<T> {
+struct FutureState<'t, T> {
     value: Option<T>,
-    callbacks: Vec<Box<Fn(&T) -> ()>>
+    callbacks: Vec<Box<'t + Fn(&T) -> ()>>
 }
 
-impl<T> FutureState<T> {
-    fn new(value: T) -> FutureState<T> {
+impl<'t, T> FutureState<'t, T> {
+    fn new(value: T) -> FutureState<'t, T> {
         FutureState {
             value: Option::Some(value),
             callbacks: Vec::new()
@@ -55,8 +55,8 @@ impl<T> FutureState<T> {
     }
 }
 
-impl<T> Default for FutureState<T> {
-    fn default() -> FutureState<T> {
+impl<'t, T> Default for FutureState<'t, T> {
+    fn default() -> FutureState<'t, T> {
         FutureState {
             value: Option::None,
             callbacks: Vec::new()
@@ -65,29 +65,29 @@ impl<T> Default for FutureState<T> {
 }
 
 #[derive(Clone, Default)]
-pub struct Future<T> {
-    state: Arc<Spinlock<FutureState<T>>>
+pub struct Future<'t, T> {
+    state: Arc<Spinlock<FutureState<'t, T>>>
 }
 
 #[derive(Clone, Default)]
-pub struct Promise<T> {
-    state: Arc<Spinlock<FutureState<T>>>
+pub struct Promise<'t, T> {
+    state: Arc<Spinlock<FutureState<'t, T>>>
 }
 
-impl<T> Promise<T> {
-    pub fn new() -> Promise<T> {
+impl<'t, T> Promise<'t, T> {
+    pub fn new() -> Promise<'t, T> {
         Promise {
             state: Arc::new(Spinlock::new(FutureState::default()))
         }
     }
 
-    pub fn future(self: &Promise<T>) -> Future<T> {
+    pub fn future(self: &Promise<'t, T>) -> Future<'t, T> {
         Future {
             state: self.state.clone()
         }
     }
 
-    pub fn set_value(self: &Promise<T>, value: T) {
+    pub fn set_value(self: &Promise<'t, T>, value: T) {
         let callbacks = {
             let (ref mut state, _) = self.state.lock();
             state.value = Option::Some(value);
@@ -103,21 +103,21 @@ impl<T> Promise<T> {
     }
 }
 
-impl<T> Future<T> {
-    pub fn new(val: T) -> Future<T> {
+impl<'t, T> Future<'t, T> {
+    pub fn new(val: T) -> Future<'t, T> {
         Future {
             state: Arc::new(Spinlock::new(FutureState::new(val)))
         }
     }
 
-    pub fn then<R: 'static, Func: 'static + Fn(&T) -> R>(self: &Future<T>, f: Func) -> Future<R> {
+    pub fn then<R: 't, Func: 't + Fn(&T) -> R>(self: &Future<'t, T>, f: Func) -> Future<'t, R> {
         let to_set = Promise::new();
         let res = to_set.future();
         self.subscribe(move |x| {to_set.set_value(f(x));});
         res
     }
 
-    fn subscribe<Func: 'static + Fn(&T) -> ()>(self: &Future<T>, f: Func) {
+    fn subscribe<Func: 't + Fn(&T) -> ()>(self: &Future<'t, T>, f: Func) {
         let (state, guard) = self.state.lock();
         match state.value {
             None => {
