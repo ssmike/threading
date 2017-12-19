@@ -1,5 +1,6 @@
 use future::Promise;
 use std::sync::mpsc::channel;
+use std::thread;
 
 #[test]
 fn check_work() {
@@ -12,6 +13,8 @@ fn check_work() {
         });
         a
     };
-    promise.set_value(5);
+    thread::spawn(move || {
+        promise.set_value(5);
+    });
     assert_eq!(rx.recv().unwrap(), 5);
 }

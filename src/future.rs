@@ -69,10 +69,14 @@ pub struct Future<'t, T> {
     state: Arc<Spinlock<FutureState<'t, T>>>
 }
 
+unsafe impl<'t, T> Send for Future<'t, T> {}
+
 #[derive(Clone, Default)]
 pub struct Promise<'t, T> {
     state: Arc<Spinlock<FutureState<'t, T>>>
 }
+
+unsafe impl<'t, T> Send for Promise<'t, T> {}
 
 impl<'t, T> Promise<'t, T> {
     pub fn new() -> Promise<'t, T> {
