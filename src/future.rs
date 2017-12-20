@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc};
 use std::mem;
 use std::cell::UnsafeCell;
+use std::ops::{DerefMut, Deref};
 
 #[derive(Default)]
 struct Spinlock<T> {
@@ -21,6 +22,20 @@ impl<'t, T: 't> Drop for SpinlockGuard<'t, T> {
     }
 }
 
+impl<'t, T: 't> Deref for SpinlockGuard<'t, T> {
+    type Target = T;
+
+    fn deref(self: &SpinlockGuard<'t, T>) -> &T {
+        unsafe {mem::transmute(self.parent.data.get())}
+    }
+}
+
+impl<'t, T: 't> DerefMut for SpinlockGuard<'t, T> {
+    fn deref_mut(self: &mut SpinlockGuard<'t, T>) -> &mut T {
+        unsafe {mem::transmute(self.parent.data.get())}
+    }
+}
+
 impl<T> Spinlock<T> {
     fn new(value: T) -> Spinlock<T> {
         Spinlock {
@@ -29,11 +44,11 @@ impl<T> Spinlock<T> {
         }
     }
 
-    fn lock<'t>(self: &'t Spinlock<T>) -> (&'t mut T, SpinlockGuard<'t, T>) {
+    fn lock<'t>(self: &'t Spinlock<T>) -> (SpinlockGuard<'t, T>) {
         while self.cnt.fetch_add(1, Ordering::SeqCst) != 0 {
             self.cnt.fetch_sub(1, Ordering::SeqCst);
         }
-        (unsafe {self.get()}, SpinlockGuard{parent: self})
+        SpinlockGuard{parent: self}
     }
 
     unsafe fn get<'t>(self: &'t Spinlock<T>) -> &'t mut T {
@@ -86,7 +101,8 @@ impl<'t, T> Promise<'t, T> {
 
     pub fn set(self: Promise<'t, T>, value: T) {
         let callbacks = {
-            let (ref mut state, _) = self.state.lock();
+            let mut guard = self.state.lock();
+            let mut state = guard;
             state.value = Option::Some(value);
             let mut vec = Vec::<Box<FnBox(&T) -> ()>>::new();
             mem::swap(&mut vec, &mut state.callbacks);
@@ -114,13 +130,13 @@ impl<'t, T> Future<'t, T> {
     }
 
     fn subscribe<Func: 't + FnOnce(&T) -> ()>(self: &Future<'t, T>, f: Func) {
-        let (state, guard) = self.state.lock();
+        let mut state = self.state.lock();
         match state.value {
             None => {
                 state.callbacks.push(Box::new(f));
             },
             Some(_) => {
-                mem::drop(guard);
+                mem::drop(state);
                 let state = unsafe { self.state.get() };
                 f(state.value.as_ref().unwrap());
             }

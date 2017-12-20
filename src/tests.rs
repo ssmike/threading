@@ -1,4 +1,4 @@
-use future::Promise;
+use future::{Promise, Future};
 use std::sync::mpsc::channel;
 use std::thread;
 
