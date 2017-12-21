@@ -58,24 +58,24 @@ impl<T> Spinlock<T> {
     }
 }
 
-struct Event {
+pub struct Event {
     var: Condvar,
     set: Mutex<bool>
 }
 
 impl Event {
-    fn new() -> Event {
+    pub fn new() -> Event {
         Event {
             set: Mutex::new(false),
             var: Condvar::new()
         }
     }
 
-    fn reset(self: &Event) {
+    pub fn reset(self: &Event) {
         *(self.set.lock().unwrap()) = false;
     }
 
-    fn wait(self: &Event) {
+    pub fn wait(self: &Event) {
         loop {
             let lock = self.set.lock().unwrap();
             if *lock {
@@ -86,7 +86,7 @@ impl Event {
         }
     }
 
-    fn signal(self: &Event) {
+    pub fn signal(self: &Event) {
         let mut lock = self.set.lock().unwrap();
         *lock = true;
         self.var.notify_all();
