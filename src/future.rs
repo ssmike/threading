@@ -5,6 +5,8 @@ use std::sync::{Arc};
 use std::mem;
 use std::cell::UnsafeCell;
 use std::ops::{DerefMut, Deref};
+use std::thread;
+use std::marker::PhantomData;
 
 #[derive(Default)]
 struct Spinlock<T> {
@@ -143,4 +145,48 @@ impl<'t, T> Future<'t, T> {
         }
     }
 
+}
+
+pub struct DeferScope<'t> {
+    to_run: Vec<Box<'t + FnBox() -> ()>>,
+    _marker: PhantomData<&'t ()>
+}
+
+impl<'t> DeferScope<'t> {
+    fn defer<Func: 't + FnOnce() -> ()>(self: &mut DeferScope<'t>, f: Func) {
+        self.to_run.push(Box::new(f));
+    }
+}
+
+impl<'t> Drop for DeferScope<'t> {
+    fn drop(self: &mut DeferScope<'t>) {
+        let mut callbacks = Vec::new();
+        mem::swap(&mut callbacks, &mut self.to_run);
+        callbacks.into_iter().for_each(|x| {
+            FnBox::call_box(x, ());
+        });
+    }
+}
+
+pub fn enter<'t, Func>(f: Func)
+    where Func: 't + FnOnce(&mut DeferScope<'t>) -> ()
+{
+    let mut scope = DeferScope {
+        to_run: Vec::new(),
+        _marker: PhantomData
+    };
+    f(&mut scope);
+}
+
+pub fn spawn<'t, Func>(scope: &mut DeferScope<'t>, f: Func)
+    where Func: 't + FnOnce() -> ()
+{
+    let to_send: Box<'t + FnBox() -> ()> = Box::new(f);
+    let to_send: Box<'static + FnBox() -> () + Send> = unsafe{mem::transmute(to_send)};
+    let to_join = thread::spawn(move || {
+        FnBox::call_box(to_send, ());
+    });
+    scope.defer(move || {
+        to_join.join().unwrap();
+    })
 }

@@ -1,4 +1,4 @@
-use future::{Promise, Future};
+use future::{Promise, Future, enter, spawn};
 use std::sync::mpsc::channel;
 use std::thread;
 
@@ -18,4 +18,21 @@ fn check_work() {
         promise.set(test_val);
     });
     assert_eq!(rx.recv().unwrap(), test_val);
+}
+
+#[test]
+fn check_scoped() {
+    let mut x = 5;
+    enter(|scope| {
+        assert_eq!(x, 5);
+        let mut y = 7;
+        spawn(scope, || {
+            //wouldn't compile, should outlive scope
+            //assert_eq!(y, 2);
+            x += 5
+        });
+        //wouldn't compile, borrowed mutably
+        //assert_eq!(x, 5 + 5);
+    });
+    assert_eq!(x, 5 + 5);
 }
