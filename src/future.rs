@@ -1,7 +1,7 @@
 use std::option::Option;
 use std::boxed::{Box, FnBox};
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc};
+use std::sync::{Arc, Mutex};
 use std::mem;
 use std::cell::UnsafeCell;
 use std::ops::{DerefMut, Deref};
@@ -148,20 +148,20 @@ impl<'t, T> Future<'t, T> {
 }
 
 pub struct DeferScope<'t> {
-    to_run: Vec<Box<'t + FnBox() -> ()>>,
+    to_run: Mutex<Vec<Box<'t + FnBox() -> ()>>>,
     _marker: PhantomData<&'t ()>
 }
 
 impl<'t> DeferScope<'t> {
-    fn defer<Func: 't + FnOnce() -> ()>(self: &mut DeferScope<'t>, f: Func) {
-        self.to_run.push(Box::new(f));
+    fn defer<Func: 't + FnOnce() -> ()>(self: &DeferScope<'t>, f: Func) {
+        self.to_run.lock().unwrap().push(Box::new(f));
     }
 }
 
 impl<'t> Drop for DeferScope<'t> {
     fn drop(self: &mut DeferScope<'t>) {
         let mut callbacks = Vec::new();
-        mem::swap(&mut callbacks, &mut self.to_run);
+        mem::swap(&mut callbacks, &mut self.to_run.lock().unwrap());
         callbacks.into_iter().for_each(|x| {
             FnBox::call_box(x, ());
         });
@@ -169,19 +169,19 @@ impl<'t> Drop for DeferScope<'t> {
 }
 
 pub fn enter<'t, Func>(f: Func)
-    where Func: 't + FnOnce(&mut DeferScope<'t>) -> ()
+    where Func: 't + FnOnce(&DeferScope<'t>) -> ()
 {
     let mut scope = DeferScope {
-        to_run: Vec::new(),
+        to_run: Mutex::new(Vec::new()),
         _marker: PhantomData
     };
     f(&mut scope);
 }
 
-pub fn spawn<'t, Func>(scope: &mut DeferScope<'t>, f: Func)
-    where Func: 't + FnOnce() -> ()
+pub fn spawn<'t, Func>(scope: &DeferScope<'t>, f: Func)
+    where Func: 't + Send + FnOnce() -> ()
 {
-    let to_send: Box<'t + FnBox() -> ()> = Box::new(f);
+    let to_send: Box<'t + FnBox() -> () + Send> = Box::new(f);
     let to_send: Box<'static + FnBox() -> () + Send> = unsafe{mem::transmute(to_send)};
     let to_join = thread::spawn(move || {
         FnBox::call_box(to_send, ());
