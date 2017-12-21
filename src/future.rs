@@ -1,7 +1,7 @@
 use std::option::Option;
 use std::boxed::{Box, FnBox};
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Condvar};
 use std::mem;
 use std::cell::UnsafeCell;
 use std::ops::{DerefMut, Deref};
@@ -58,17 +58,60 @@ impl<T> Spinlock<T> {
     }
 }
 
-struct FutureState<'t, T> {
+struct Event {
+    var: Condvar,
+    set: Mutex<bool>
+}
+
+impl Event {
+    fn new() -> Event {
+        Event {
+            set: Mutex::new(false),
+            var: Condvar::new()
+        }
+    }
+
+    fn reset(self: &Event) {
+        *(self.set.lock().unwrap()) = false;
+    }
+
+    fn wait(self: &Event) {
+        loop {
+            let lock = self.set.lock().unwrap();
+            if *lock {
+                break;
+            } else {
+                self.var.wait(lock);
+            }
+        }
+    }
+
+    fn signal(self: &Event) {
+        let mut lock = self.set.lock().unwrap();
+        *lock = true;
+        self.var.notify_all();
+    }
+}
+
+struct FutureState<'t, T>
+    where T: 't
+{
     value: Option<T>,
-    callbacks: Vec<Box<'t + FnBox(&T) -> ()>>
+    callbacks: Vec<Box<'t + FnBox(&T) -> ()>>,
+    ready_event: Option<Box<Event>>
 }
 
 impl<'t, T> FutureState<'t, T> {
     fn new(value: T) -> FutureState<'t, T> {
         FutureState {
             value: Option::Some(value),
-            callbacks: Vec::new()
+            callbacks: Vec::new(),
+            ready_event: None
         }
+    }
+
+    unsafe fn get(self: &FutureState<'t, T>) -> &'t T {
+        mem::transmute(self.value.as_ref().unwrap())
     }
 }
 
@@ -76,20 +119,25 @@ impl<'t, T> Default for FutureState<'t, T> {
     fn default() -> FutureState<'t, T> {
         FutureState {
             value: Option::None,
-            callbacks: Vec::new()
+            callbacks: Vec::new(),
+            ready_event: None
         }
     }
 }
 
 #[derive(Clone, Default)]
-pub struct Future<'t, T> {
+pub struct Future<'t, T>
+    where T: 't
+{
     state: Arc<Spinlock<FutureState<'t, T>>>
 }
 
 unsafe impl<'t, T> Send for Future<'t, T> {}
 
 #[derive(Default)]
-pub struct Promise<'t, T> {
+pub struct Promise<'t, T>
+    where T: 't
+{
     state: Arc<Spinlock<FutureState<'t, T>>>
 }
 
@@ -111,6 +159,7 @@ impl<'t, T> Promise<'t, T> {
             vec
         };
         let state = unsafe { self.state.get() };
+        state.ready_event.as_ref().map(|ev| {ev.signal()});
         let value = state.value.as_ref().unwrap();
         callbacks.into_iter().for_each(|f| {
             FnBox::call_box(f, (value,));
@@ -145,6 +194,17 @@ impl<'t, T> Future<'t, T> {
         }
     }
 
+    pub fn wait(self: &Future<'t, T>) -> &'t T {
+        {
+            let mut locked = self.state.lock();
+            if locked.ready_event.is_none() && locked.value.is_none() {
+                locked.ready_event = Option::Some(Box::new(Event::new()));
+            }
+        }
+        let state = unsafe { self.state.get() };
+        state.ready_event.as_ref().map(|ev| {ev.wait()});
+        unsafe{state.get()}
+    }
 }
 
 pub struct DeferScope<'t> {
@@ -155,6 +215,29 @@ pub struct DeferScope<'t> {
 impl<'t> DeferScope<'t> {
     fn defer<Func: 't + FnOnce() -> ()>(self: &DeferScope<'t>, f: Func) {
         self.to_run.lock().unwrap().push(Box::new(f));
+    }
+
+    pub fn spawn<Func>(self: &DeferScope<'t>, f: Func)
+        where Func: 't + Send + FnOnce() -> ()
+    {
+        let to_send: Box<'t + FnBox() -> () + Send> = Box::new(f);
+        let to_send: Box<'static + FnBox() -> () + Send> = unsafe{mem::transmute(to_send)};
+        let to_join = thread::spawn(move || {
+            FnBox::call_box(to_send, ());
+        });
+        self.defer(move || {
+            to_join.join().unwrap();
+        });
+    }
+
+    pub fn async<Func, R>(self: &DeferScope<'t>, f: Func) -> Future<'t, R>
+        where Func: 't + Send + FnOnce() -> R
+    {
+        let (promise, future) = Promise::new();
+        self.spawn(move || {
+            promise.set(f());
+        });
+        future
     }
 }
 
@@ -168,25 +251,23 @@ impl<'t> Drop for DeferScope<'t> {
     }
 }
 
-pub fn enter<'t, Func>(f: Func)
-    where Func: 't + FnOnce(&DeferScope<'t>) -> ()
+pub fn enter<'t, Func, R>(f: Func) -> R
+    where Func: 't + FnOnce(&DeferScope<'t>) -> R
 {
     let mut scope = DeferScope {
         to_run: Mutex::new(Vec::new()),
         _marker: PhantomData
     };
-    f(&mut scope);
+    f(&mut scope)
 }
 
-pub fn spawn<'t, Func>(scope: &DeferScope<'t>, f: Func)
-    where Func: 't + Send + FnOnce() -> ()
+pub fn async<Func, R>(f: Func) -> Future<'static, R>
+    where Func: 'static + Send + FnOnce() -> R,
+          R: 'static
 {
-    let to_send: Box<'t + FnBox() -> () + Send> = Box::new(f);
-    let to_send: Box<'static + FnBox() -> () + Send> = unsafe{mem::transmute(to_send)};
-    let to_join = thread::spawn(move || {
-        FnBox::call_box(to_send, ());
+    let (promise, future) = Promise::new();
+    thread::spawn(move || {
+        promise.set(f());
     });
-    scope.defer(move || {
-        to_join.join().unwrap();
-    })
+    future
 }
