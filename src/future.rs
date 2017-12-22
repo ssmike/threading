@@ -56,6 +56,13 @@ impl<T> Spinlock<T> {
     unsafe fn get<'t>(self: &'t Spinlock<T>) -> &'t mut T {
         mem::transmute(self.data.get())
     }
+
+    fn unwrap(self: Spinlock<T>) -> T {
+        while self.cnt.fetch_add(1, Ordering::SeqCst) != 0 {
+            self.cnt.fetch_sub(1, Ordering::SeqCst);
+        }
+        unsafe {self.data.into_inner()}
+    }
 }
 
 pub struct Event {
@@ -125,7 +132,7 @@ impl<'t, T> Default for FutureState<'t, T> {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct Future<'t, T>
     where T: 't
 {
@@ -133,6 +140,14 @@ pub struct Future<'t, T>
 }
 
 unsafe impl<'t, T> Send for Future<'t, T> {}
+
+impl<'t, T> Clone for Future<'t, T> {
+    fn clone(self: &Future<'t, T>) -> Future<'t, T> {
+        Future {
+            state: self.state.clone()
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct Promise<'t, T>
@@ -174,11 +189,30 @@ impl<'t, T> Future<'t, T> {
         }
     }
 
-    pub fn then<R: 't, Func: 't + FnOnce(&T) -> R>(self: &Future<'t, T>, f: Func) -> Future<'t, R> {
+    unsafe fn take(self: &Future<'t, T>) -> Option<T> {
+        self.state.lock().value.take()
+    }
+
+    pub fn map<R: 't, Func: 't + FnOnce(&T) -> R>(self: &Future<'t, T>, f: Func) -> Future<'t, R> {
         let (promise, future) = Promise::new();
         self.subscribe(move |x| {promise.set(f(x));});
         future
     }
+
+    pub fn then<R: 't, Func: 't + FnOnce(&T) -> Future<'t, R>>(self: &Future<'t, T>, f: Func) -> Future<'t, R> {
+        let (promise, future) = Promise::new();
+        self.subscribe(move |x| {
+            let sub = f(x);
+            let borrow = sub.clone();
+            sub.subscribe(move |_| {
+                // here we take value out of state, which executes this callback
+                // so _ is dangling :)
+                promise.set(unsafe {borrow.take().unwrap()});
+            });
+        });
+        future
+    }
+
 
     fn subscribe<Func: 't + FnOnce(&T) -> ()>(self: &Future<'t, T>, f: Func) {
         let mut state = self.state.lock();

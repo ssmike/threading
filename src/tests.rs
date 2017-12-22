@@ -10,7 +10,7 @@ fn check_work() {
     let promise = {
         let (promise, future) = Promise::new();
         let tx = tx.clone();
-        future.then(move |x| {
+        future.map(move |x| {
             tx.send(*x).unwrap();
         });
         promise
@@ -67,7 +67,7 @@ fn check_asyncs() {
             thread::sleep(time::Duration::from_millis(2));
             x += arr[1];
             x
-        }).then(|t| {
+        }).map(|t| {
             thread::sleep(time::Duration::from_millis(4));
             println!("{}", t);
             *t + arr[2]

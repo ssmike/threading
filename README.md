@@ -8,7 +8,7 @@ future | Arcadia
 --------|-------
 Future | TFuture
 Future::new | MakeFuture
-Future::then | TFuture::Apply
+Future::then/Future::map | TFuture::Apply
 Future::wait | TFuture::GetValueSync
 Promise | TPromise
 Promise::new | NewPromise + TPromise::GetFuture
