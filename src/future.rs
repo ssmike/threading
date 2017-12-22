@@ -228,7 +228,7 @@ impl<'t, T> Future<'t, T> {
         }
     }
 
-    pub fn wait(self: &Future<'t, T>) -> &'t T {
+    pub fn wait(self: &Future<'t, T>) -> &T {
         {
             let mut locked = self.state.lock();
             if locked.ready_event.is_none() && locked.value.is_none() {
