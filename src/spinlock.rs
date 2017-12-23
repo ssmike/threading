@@ -1,12 +1,14 @@
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{Ordering, AtomicBool};
 use std::ops::{DerefMut, Deref};
 use std::cell::UnsafeCell;
+use std::option::Option;
 use std::mem;
 
 #[derive(Default)]
 pub struct Spinlock<T> {
-    cnt: AtomicI64,
-    data: UnsafeCell<T>
+    locked: AtomicBool,
+    data: UnsafeCell<T>,
+    read_only: AtomicBool
 }
 
 unsafe impl<T> Sync for Spinlock<T> {}
@@ -18,7 +20,7 @@ pub struct SpinlockGuard<'t, T: 't> {
 
 impl<'t, T: 't> Drop for SpinlockGuard<'t, T> {
     fn drop(self: &mut SpinlockGuard<'t, T>) {
-        self.parent.cnt.fetch_sub(1, Ordering::SeqCst);
+        self.parent.locked.store(false, Ordering::SeqCst);
     }
 }
 
@@ -39,26 +41,39 @@ impl<'t, T: 't> DerefMut for SpinlockGuard<'t, T> {
 impl<T> Spinlock<T> {
     pub fn new(value: T) -> Spinlock<T> {
         Spinlock {
-            cnt: AtomicI64::new(0),
+            locked: AtomicBool::new(false),
+            read_only: AtomicBool::new(false),
             data: UnsafeCell::from(value)
         }
     }
 
-    pub fn lock<'t>(self: &'t Spinlock<T>) -> (SpinlockGuard<'t, T>) {
-        while self.cnt.fetch_add(1, Ordering::SeqCst) != 0 {
-            self.cnt.fetch_sub(1, Ordering::SeqCst);
-        }
-        SpinlockGuard{parent: self}
+    fn read_only(self: &Spinlock<T>) -> bool {
+        self.read_only.load(Ordering::SeqCst)
     }
 
-    pub unsafe fn get<'t>(self: &'t Spinlock<T>) -> &'t mut T {
-        mem::transmute(self.data.get())
+    fn take(self: &Spinlock<T>) -> bool {
+        while !self.locked.compare_and_swap(false, true, Ordering::SeqCst) {
+            if self.read_only() {
+                return false;
+            }
+        }
+        true
     }
 
-    pub fn unwrap(self: Spinlock<T>) -> T {
-        while self.cnt.fetch_add(1, Ordering::SeqCst) != 0 {
-            self.cnt.fetch_sub(1, Ordering::SeqCst);
+    pub fn lock<'t>(self: &'t Spinlock<T>) -> Option<SpinlockGuard<'t, T>> {
+        if self.take() {
+            Some(SpinlockGuard{parent: self})
+        } else {
+            None
         }
-        unsafe {self.data.into_inner()}
+    }
+
+    pub fn share(self: &Spinlock<T>) -> &T {
+        if !self.read_only() {
+            self.take();
+            self.read_only.store(true, Ordering::SeqCst)
+        }
+        unsafe {mem::transmute(self.data.get())}
     }
 }
+

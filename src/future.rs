@@ -10,8 +10,8 @@ struct FutureState<'t, T>
     where T: 't
 {
     value: Option<T>,
-    callbacks: Vec<Box<'t + FnBox(&T) -> () + Send>>,
-    ready_event: Option<Box<Event>>
+    callbacks: Vec<Box<'t + FnBox(&Future<'t, T>) -> () + Send>>,
+    ready_event: Option<Arc<Event>>
 }
 
 impl<'t, T> FutureState<'t, T> {
@@ -21,10 +21,6 @@ impl<'t, T> FutureState<'t, T> {
             callbacks: Vec::new(),
             ready_event: None
         }
-    }
-
-    unsafe fn get(self: &FutureState<'t, T>) -> &'t T {
-        mem::transmute(self.value.as_ref().unwrap())
     }
 }
 
@@ -68,18 +64,16 @@ impl<'t, T> Promise<'t, T> {
 
     pub fn set(self: Promise<'t, T>, value: T) {
         let callbacks = {
-            let mut guard = self.state.lock();
-            let mut state = guard;
+            let mut state = self.state.lock().expect("spinlock poisoned");
             state.value = Option::Some(value);
             let mut vec = Vec::new();
             mem::swap(&mut vec, &mut state.callbacks);
+            state.ready_event.as_ref().map(|ev| {ev.signal()});
             vec
         };
-        let state = unsafe { self.state.get() };
-        state.ready_event.as_ref().map(|ev| {ev.signal()});
-        let value = state.value.as_ref().unwrap();
+        let to_pass = Future{state: self.state};
         callbacks.into_iter().for_each(|f| {
-            FnBox::call_box(f, (value,));
+            FnBox::call_box(f, (&to_pass,));
         });
     }
 }
@@ -91,16 +85,36 @@ impl<'t, T> Future<'t, T> {
         }
     }
 
-    unsafe fn take(self: &Future<'t, T>) -> Option<T> {
-        self.state.lock().value.take()
+    fn _get(self: &Future<'t, T>) -> &T {
+        let state = self.state.share();
+        state.value.as_ref().expect("value was moved")
     }
 
-    pub fn map<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
+    fn _take(self: &Future<'t, T>) -> T {
+        let mut state = self.state.lock();
+        let val = state.as_mut().and_then(|state| state.value.take());
+        val.expect("value was moved")
+    }
+
+    pub fn apply<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
         where R: 't,
               Func: 't + FnOnce(&T) -> R + Send
     {
         let (promise, future) = Promise::new();
-        self.subscribe(move |x| {promise.set(f(x));});
+        self.subscribe(move |future| {
+            promise.set(f(future._get()));
+        });
+        future
+    }
+
+    pub fn map<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
+        where R: 't,
+              Func: 't + FnOnce(T) -> R + Send
+    {
+        let (promise, future) = Promise::new();
+        self.subscribe(move |future| {
+            promise.set(f(future._take()));
+        });
         future
     }
 
@@ -109,45 +123,65 @@ impl<'t, T> Future<'t, T> {
               R: 't
     {
         let (promise, future) = Promise::new();
-        self.subscribe(move |x| {
-            let sub = f(x);
-            let borrow = sub.clone();
-            sub.subscribe(move |_| {
-                // here we take value out of state, which executes this callback
-                // so _ is dangling :)
-                promise.set(unsafe {borrow.take().unwrap()});
+        self.subscribe(move |future| {
+            f(future._get()).subscribe(move |future| {
+                promise.set(future._take());
             });
         });
         future
     }
 
+    pub fn chain<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
+        where Func: 't + FnOnce(T) -> Future<'t, R> + Send,
+              R: 't
+    {
+        let (promise, future) = Promise::new();
+        self.subscribe(move |x| {
+            f(x._take()).subscribe(move |future| {
+                promise.set(future._take());
+            });
+        });
+        future
+    }
 
     fn subscribe<Func>(self: &Future<'t, T>, f: Func)
-        where Func: 't + FnOnce(&T) -> () + Send
+        where Func: 't + FnOnce(&Future<'t, T>) -> () + Send
     {
-        let mut state = self.state.lock();
-        match state.value {
-            None => {
-                state.callbacks.push(Box::new(f));
-            },
-            Some(_) => {
-                mem::drop(state);
-                let state = unsafe { self.state.get() };
-                f(state.value.as_ref().unwrap());
-            }
+        let mut guard = self.state.lock();
+        if guard.is_none() || guard.as_ref().unwrap().value.is_some() {
+            drop(guard);
+            f(self);
+        } else {
+            guard.as_mut().unwrap().callbacks.push(Box::new(f));
         }
     }
 
-    pub fn wait(self: &Future<'t, T>) -> &T {
-        {
-            let mut locked = self.state.lock();
-            if locked.ready_event.is_none() && locked.value.is_none() {
-                locked.ready_event = Option::Some(Box::new(Event::new()));
+    pub fn wait(self: &Future<'t, T>) {
+        let to_wait: Option<Arc<Event>> = {
+            match self.state.lock() {
+                None => {None},
+                Some(ref mut locked) => {
+                    if locked.ready_event.is_none() && locked.value.is_none() {
+                        let event = Arc::new(Event::new());
+                        locked.ready_event = Option::Some(event.clone());
+                        Some(event)
+                    } else {
+                        None
+                    }
+                }
             }
-        }
-        let state = unsafe { self.state.get() };
-        state.ready_event.as_ref().map(|ev| {ev.wait()});
-        unsafe{state.get()}
+        };
+        to_wait.map(|ev| {ev.wait()});
+    }
+
+    pub fn get(self: &Future<'t, T>) -> &T {
+        self.wait();
+        self._get()
+    }
+
+    pub fn take(self: &Future<'t, T>) -> T {
+        self.wait();
+        self._take()
     }
 }
 

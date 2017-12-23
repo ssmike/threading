@@ -7,13 +7,20 @@ use std::thread;
 use std::time;
 
 #[test]
+fn check_single() {
+    let (promise, future) = Promise::new();
+    promise.set(2);
+    assert_eq!(future.get(), &2);
+}
+
+#[test]
 fn check_work() {
     let test_val = 5;
     let (tx, rx) = channel();
     let promise = {
         let (promise, future) = Promise::new();
         let tx = tx.clone();
-        future.map(move |x| {
+        future.apply(move |x| {
             tx.send(*x).unwrap();
         });
         promise
@@ -42,12 +49,12 @@ fn check_scoped() {
 }
 
 #[test]
-fn check_wait() {
+fn check_get() {
     let (promise, future) = Promise::<i32>::new();
     thread::spawn(move || {
         promise.set(2 + 2);
     });
-    assert_eq!(future.wait(), &4);
+    assert_eq!(future.get(), &4);
 }
 
 #[test]
@@ -56,7 +63,7 @@ fn check_static_async() {
         thread::sleep(time::Duration::from_millis(4));
         2 + 2
     });
-    assert_eq!(r.wait(), &4);
+    assert_eq!(r.get(), &4);
 }
 
 #[test]
@@ -73,12 +80,12 @@ fn check_asyncs() {
         }).map(|t| {
             thread::sleep(time::Duration::from_millis(4));
             println!("{}", t);
-            *t + arr[2]
+            t + arr[2]
         });
-        res1.wait();
-        res2.wait();
-        assert_eq!(res1.wait(), res2.wait());
-        *res1.wait()
+        res1.get();
+        res2.get();
+        assert_eq!(res1.get(), res2.get());
+        *res1.get()
     });
     assert_eq!(sm, res1);
 }

@@ -8,8 +8,9 @@ future | Arcadia
 --------|-------
 Future | TFuture
 Future::new | MakeFuture
-Future::then/Future::map | TFuture::Apply
-Future::wait | TFuture::GetValueSync
+Future::apply/map/then/chain | TFuture::Apply
+Future::get | TFuture::GetValueSync
+Future::take | TFuture::ExtractValueSync
 Promise | TPromise
 Promise::new | NewPromise + TPromise::GetFuture
 Promise::set | TPromise::SetValue
@@ -23,4 +24,4 @@ wait_any | WaitAny
 
 Mimicking ugly enterprise interfaces was not priority, so there are no GetValue and Promises could be set only once.
 
-TODO: ExtractValue
+TODO: refine apply methods family
