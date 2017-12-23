@@ -1,4 +1,5 @@
-use future::{Promise, Future, enter, async, wait_all, wait_any};
+use future::{Promise, Future, wait_all, wait_any};
+use async::{enter, async, DeferScope};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::channel;
