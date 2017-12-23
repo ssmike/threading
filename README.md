@@ -16,7 +16,7 @@ Promise::set | TPromise::SetValue
 Event | TManualEvent
 Event::reset | TManualEvent::Reset
 Event::signal | TManualEvent::Signal
-async/DeferScope::async | Async
+async/DeferScope::async | TLegacyFuture
 wait_all | WaitAll
 wait_any | WaitAny
 
