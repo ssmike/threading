@@ -11,8 +11,8 @@ pub struct Spinlock<T> {
     read_only: AtomicBool
 }
 
-unsafe impl<T> Sync for Spinlock<T> {}
-unsafe impl<T> Send for Spinlock<T> {}
+unsafe impl<T: Send + Sync> Sync for Spinlock<T> {}
+unsafe impl<T: Send> Send for Spinlock<T> {}
 
 pub struct SpinlockGuard<'t, T: 't> {
     parent: &'t Spinlock<T>,

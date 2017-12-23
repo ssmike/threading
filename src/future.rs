@@ -14,6 +14,9 @@ struct FutureState<'t, T>
     ready_event: Option<Arc<Event>>
 }
 
+// all calbacks will be executed once, so
+unsafe impl<'t, T: Sync> Sync for FutureState<'t, T> {}
+
 impl<'t, T> FutureState<'t, T> {
     fn new(value: T) -> FutureState<'t, T> {
         FutureState {
@@ -34,22 +37,13 @@ impl<'t, T> Default for FutureState<'t, T> {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Future<'t, T>
     where T: 't
 {
     state: Arc<Spinlock<FutureState<'t, T>>>
 }
 
-impl<'t, T> Clone for Future<'t, T> {
-    fn clone(self: &Future<'t, T>) -> Future<'t, T> {
-        Future {
-            state: self.state.clone()
-        }
-    }
-}
-
-#[derive(Default)]
 pub struct Promise<'t, T>
     where T: 't
 {
@@ -97,7 +91,7 @@ impl<'t, T> Future<'t, T> {
     }
 
     pub fn apply<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
-        where R: 't,
+        where R: 't + Send + Sync,
               Func: 't + FnOnce(&T) -> R + Send
     {
         let (promise, future) = Promise::new();
@@ -108,8 +102,8 @@ impl<'t, T> Future<'t, T> {
     }
 
     pub fn map<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
-        where R: 't,
-              Func: 't + FnOnce(T) -> R + Send
+        where Func: 't + FnOnce(T) -> R + Send,
+              R: 't + Send + Sync
     {
         let (promise, future) = Promise::new();
         self.subscribe(move |future| {
@@ -120,7 +114,7 @@ impl<'t, T> Future<'t, T> {
 
     pub fn then<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
         where Func: 't + FnOnce(&T) -> Future<'t, R> + Send,
-              R: 't
+              R: 't + Send + Sync
     {
         let (promise, future) = Promise::new();
         self.subscribe(move |future| {
@@ -133,7 +127,7 @@ impl<'t, T> Future<'t, T> {
 
     pub fn chain<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
         where Func: 't + FnOnce(T) -> Future<'t, R> + Send,
-              R: 't
+              R: 't + Send + Sync
     {
         let (promise, future) = Promise::new();
         self.subscribe(move |x| {
@@ -187,13 +181,13 @@ impl<'t, T> Future<'t, T> {
 
 #[derive(Clone)]
 struct Waiter<F>
-    where F: Send + FnBox() -> ()
+    where F: FnBox() -> ()
 {
     on_destroy: Option<Box<F>>
 }
 
 impl<F> Waiter<F>
-    where F: Send + FnBox() -> ()
+    where F: FnBox() -> ()
 {
     fn new(f: F) -> Waiter<F> {
         Waiter {
@@ -203,7 +197,7 @@ impl<F> Waiter<F>
 }
 
 impl<F> Drop for Waiter<F>
-    where F: Send + FnBox() -> ()
+    where F: FnBox() -> ()
 {
     fn drop(self: &mut Waiter<F>) {
         FnBox::call_box(self.on_destroy.take().unwrap(), ())

@@ -5,6 +5,16 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time;
+use spinlock::Spinlock;
+use std::rc::Rc;
+
+//#[test]
+//fn check() {
+//    let (promise, future) = Promise::new();
+//    thread::spawn(move || {
+//        promise.set(Rc::new(5));
+//    });
+//}
 
 #[test]
 fn check_single() {
