@@ -17,6 +17,8 @@ Event | TManualEvent
 Event::reset | TManualEvent::Reset
 Event::signal | TManualEvent::Signal
 async/DeferScope::async | Async
+wait_all | WaitAll
+wait_any | WaitAny
 
 
 Mimicking ugly enterprise interfaces was not priority, so there are no GetValue and Promises could be set only once.

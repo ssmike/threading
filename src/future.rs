@@ -7,6 +7,7 @@ use std::cell::UnsafeCell;
 use std::ops::{DerefMut, Deref};
 use std::thread;
 use std::marker::PhantomData;
+use std::iter::Iterator;
 
 #[derive(Default)]
 struct Spinlock<T> {
@@ -239,6 +240,65 @@ impl<'t, T> Future<'t, T> {
         state.ready_event.as_ref().map(|ev| {ev.wait()});
         unsafe{state.get()}
     }
+}
+
+#[derive(Clone)]
+struct Waiter<F>
+    where F: Send + FnBox() -> ()
+{
+    on_destroy: Option<Box<F>>
+}
+
+impl<F> Waiter<F>
+    where F: Send + FnBox() -> ()
+{
+    fn new(f: F) -> Waiter<F> {
+        Waiter {
+            on_destroy: Some(Box::new(f))
+        }
+    }
+}
+
+impl<F> Drop for Waiter<F>
+    where F: Send + FnBox() -> ()
+{
+    fn drop(self: &mut Waiter<F>) {
+        FnBox::call_box(self.on_destroy.take().unwrap(), ())
+    }
+}
+
+pub fn wait_all<'t, T, I>(i: I) -> Future<'t, ()>
+    where I: Iterator<Item = Future<'t, T>>,
+          T: 't
+{
+    let (promise, future) = Promise::new();
+    let waiter = Arc::new(Waiter::new(
+        move || {
+            promise.set(());
+        }));
+    i.for_each(|f| {
+        let waiter = waiter.clone();
+        f.subscribe(move |_| drop(waiter));
+    });
+    future
+}
+
+pub fn wait_any<'t, T, I>(i: I) -> Future<'t, ()>
+    where I: Iterator<Item = Future<'t, T>>,
+          T: 't
+{
+    let (promise, future) = Promise::new();
+    let promise = Arc::new(Mutex::new(Some(promise)));
+    i.for_each(|f| {
+        let promise = promise.clone();
+        f.subscribe(move |_| {
+            promise
+                .lock().unwrap()
+                .take()
+                .map(|promise| promise.set(()));
+        });
+    });
+    future
 }
 
 pub struct DeferScope<'t> {

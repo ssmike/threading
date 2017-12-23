@@ -1,4 +1,6 @@
-use future::{Promise, Future, enter, async};
+use future::{Promise, Future, enter, async, wait_all, wait_any};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time;
@@ -78,4 +80,24 @@ fn check_asyncs() {
         *res1.wait()
     });
     assert_eq!(sm, res1);
+}
+
+#[test]
+fn check_wait_all() {
+    let cnt = Arc::new(AtomicI64::new(0));
+    let f1 = {
+        let cnt = cnt.clone();
+        async(move || {
+            thread::sleep(time::Duration::from_millis(2));
+            cnt.fetch_add(1, Ordering::SeqCst);
+        })
+    };
+    let f2 = {
+        let cnt = cnt.clone();
+        async(move || {
+            thread::sleep(time::Duration::from_millis(2));
+            cnt.fetch_add(1, Ordering::SeqCst);
+        })
+    };
+    wait_all(vec![f1, f2].into_iter()).map(move |_| assert_eq!(cnt.load(Ordering::SeqCst), 2));
 }
