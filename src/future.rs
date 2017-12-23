@@ -15,6 +15,9 @@ struct Spinlock<T> {
     data: UnsafeCell<T>
 }
 
+unsafe impl<T> Sync for Spinlock<T> {}
+unsafe impl<T> Send for Spinlock<T> {}
+
 struct SpinlockGuard<'t, T: 't> {
     parent: &'t Spinlock<T>,
 }
@@ -105,7 +108,7 @@ struct FutureState<'t, T>
     where T: 't
 {
     value: Option<T>,
-    callbacks: Vec<Box<'t + FnBox(&T) -> ()>>,
+    callbacks: Vec<Box<'t + FnBox(&T) -> () + Send>>,
     ready_event: Option<Box<Event>>
 }
 
@@ -140,8 +143,6 @@ pub struct Future<'t, T>
     state: Arc<Spinlock<FutureState<'t, T>>>
 }
 
-unsafe impl<'t, T> Send for Future<'t, T> {}
-
 impl<'t, T> Clone for Future<'t, T> {
     fn clone(self: &Future<'t, T>) -> Future<'t, T> {
         Future {
@@ -157,8 +158,6 @@ pub struct Promise<'t, T>
     state: Arc<Spinlock<FutureState<'t, T>>>
 }
 
-unsafe impl<'t, T> Send for Promise<'t, T> {}
-
 impl<'t, T> Promise<'t, T> {
     pub fn new() -> (Promise<'t, T>, Future<'t, T>) {
         let state = Arc::new(Spinlock::new(FutureState::default()));
@@ -170,7 +169,7 @@ impl<'t, T> Promise<'t, T> {
             let mut guard = self.state.lock();
             let mut state = guard;
             state.value = Option::Some(value);
-            let mut vec = Vec::<Box<FnBox(&T) -> ()>>::new();
+            let mut vec = Vec::new();
             mem::swap(&mut vec, &mut state.callbacks);
             vec
         };
@@ -194,13 +193,19 @@ impl<'t, T> Future<'t, T> {
         self.state.lock().value.take()
     }
 
-    pub fn map<R: 't, Func: 't + FnOnce(&T) -> R>(self: &Future<'t, T>, f: Func) -> Future<'t, R> {
+    pub fn map<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
+        where R: 't,
+              Func: 't + FnOnce(&T) -> R + Send
+    {
         let (promise, future) = Promise::new();
         self.subscribe(move |x| {promise.set(f(x));});
         future
     }
 
-    pub fn then<R: 't, Func: 't + FnOnce(&T) -> Future<'t, R>>(self: &Future<'t, T>, f: Func) -> Future<'t, R> {
+    pub fn then<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
+        where Func: 't + FnOnce(&T) -> Future<'t, R> + Send,
+              R: 't
+    {
         let (promise, future) = Promise::new();
         self.subscribe(move |x| {
             let sub = f(x);
@@ -215,7 +220,9 @@ impl<'t, T> Future<'t, T> {
     }
 
 
-    fn subscribe<Func: 't + FnOnce(&T) -> ()>(self: &Future<'t, T>, f: Func) {
+    fn subscribe<Func>(self: &Future<'t, T>, f: Func)
+        where Func: 't + FnOnce(&T) -> () + Send
+    {
         let mut state = self.state.lock();
         match state.value {
             None => {
