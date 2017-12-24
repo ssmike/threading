@@ -1,4 +1,4 @@
-use std::sync::{Mutex, Arc};
+use std::sync::Mutex;
 use std::marker::PhantomData;
 use std::boxed::{Box, FnBox};
 use future::{Future, Promise};

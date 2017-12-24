@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, Condvar};
+use std::sync::{Mutex, Condvar};
 
 pub struct Event {
     var: Condvar,
@@ -18,12 +18,12 @@ impl Event {
     }
 
     pub fn wait(self: &Event) {
+        let mut lock = self.set.lock().unwrap();
         loop {
-            let lock = self.set.lock().unwrap();
             if *lock {
                 break;
             } else {
-                self.var.wait(lock);
+                lock = self.var.wait(lock).unwrap();
             }
         }
     }

@@ -20,15 +20,15 @@ use std::rc::Rc;
 fn check_single() {
     let (promise, future) = Promise::new();
     promise.set(2);
-    assert_eq!(future.get(), &2);
+    assert_eq!(*future, 2);
 }
 
 #[test]
 fn check_work() {
     let test_val = 5;
-    let (tx, rx) = channel();
+    let (tx, rx)  = channel();
     let promise = {
-        let (promise, future) = Promise::new();
+        let (promise, future) = Promise::<i32>::new();
         let tx = tx.clone();
         future.apply(move |x| {
             tx.send(*x).unwrap();
@@ -64,7 +64,7 @@ fn check_get() {
     thread::spawn(move || {
         promise.set(2 + 2);
     });
-    assert_eq!(future.get(), &4);
+    assert_eq!(*future, 4);
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn check_static_async() {
         thread::sleep(time::Duration::from_millis(4));
         2 + 2
     });
-    assert_eq!(r.get(), &4);
+    assert_eq!(*r, 4);
 }
 
 #[test]
@@ -87,15 +87,13 @@ fn check_asyncs() {
             thread::sleep(time::Duration::from_millis(2));
             x += arr[1];
             x
-        }).map(|t| {
+        }).apply(|t| {
             thread::sleep(time::Duration::from_millis(4));
-            println!("{}", t);
-            t + arr[2]
+            println!("{}", *t);
+            *t + arr[2]
         });
-        res1.get();
-        res2.get();
-        assert_eq!(res1.get(), res2.get());
-        *res1.get()
+        assert_eq!(*res1, *res2);
+        *res1
     });
     assert_eq!(sm, res1);
 }
@@ -117,5 +115,5 @@ fn check_wait_all() {
             cnt.fetch_add(1, Ordering::SeqCst);
         })
     };
-    wait_all(vec![f1, f2].into_iter()).map(move |_| assert_eq!(cnt.load(Ordering::SeqCst), 2));
+    wait_all(vec![f1, f2].into_iter()).apply(move |_| assert_eq!(cnt.load(Ordering::SeqCst), 2));
 }
