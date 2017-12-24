@@ -132,12 +132,13 @@ impl<'t, T> Future<'t, T> {
     fn subscribe<Func>(self: &Future<'t, T>, f: Func)
         where Func: 't + FnOnce(Future<'t, T>) -> () + Send
     {
+        let boxed = Box::new(f);
         let mut guard = self.state.lock();
         if guard.is_none() || guard.as_ref().unwrap().value.is_some() {
             drop(guard);
-            f(self.clone());
+            FnBox::call_box(boxed, (self.clone(),));
         } else {
-            guard.as_mut().unwrap().callbacks.push(Box::new(f));
+            guard.as_mut().unwrap().callbacks.push(boxed);
         }
     }
 
