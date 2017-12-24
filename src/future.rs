@@ -7,10 +7,52 @@ use std::ops::Deref;
 use event::Event;
 use std::mem;
 
+use future::FutureValue::*;
+
+enum FutureValue<T> {
+    ValEmpty,
+    ValSet(T),
+    ValMoved,
+}
+
+impl<T> FutureValue<T> {
+    fn is_empty(&self) -> bool {
+        match *self {
+            ValEmpty => true,
+            _ => false
+        }
+    }
+
+    fn take(&mut self) -> T {
+        let mut new = ValMoved;
+        mem::swap(&mut new, self);
+        match new {
+            ValSet(x) => x,
+            _ => {panic!("value has been moved");}
+        }
+    }
+
+    fn read(&self) -> &T {
+        match *self {
+            ValSet(ref x) => x,
+            _ => {panic!("value has been moved");}
+        }
+    }
+
+    fn put(&mut self, val: T) {
+        match *self {
+            ValSet(_) => {panic!("double set on same future state");},
+            ValMoved => {panic!("value already moved");},
+            _ => {}
+        }
+        *self = ValSet(val);
+    }
+}
+
 struct FutureState<'t, T>
     where T: 't
 {
-    value: Option<T>,
+    value: FutureValue<T>,
     callbacks: Vec<Box<'t + FnBox(Future<'t, T>) -> () + Send>>,
     ready_event: Option<Arc<Event>>
 }
@@ -21,7 +63,7 @@ unsafe impl<'t, T: Sync> Sync for FutureState<'t, T> {}
 impl<'t, T> FutureState<'t, T> {
     fn new(value: T) -> FutureState<'t, T> {
         FutureState {
-            value: Option::Some(value),
+            value: ValSet(value),
             callbacks: Vec::new(),
             ready_event: None
         }
@@ -31,7 +73,7 @@ impl<'t, T> FutureState<'t, T> {
 impl<'t, T> Default for FutureState<'t, T> {
     fn default() -> FutureState<'t, T> {
         FutureState {
-            value: Option::None,
+            value: ValEmpty,
             callbacks: Vec::new(),
             ready_event: None
         }
@@ -60,7 +102,7 @@ impl<'t, T> Promise<'t, T> {
     pub fn set(self: Promise<'t, T>, value: T) {
         let callbacks = {
             let mut state = self.state.lock().expect("spinlock poisoned");
-            state.value = Option::Some(value);
+            state.value.put(value);
             let mut vec = Vec::new();
             mem::swap(&mut vec, &mut state.callbacks);
             state.ready_event.as_ref().map(|ev| {ev.signal()});
@@ -81,7 +123,7 @@ impl<'t, T> Deref for Future<'t, T>
     fn deref(self: &Future<'t, T>) -> &T {
         self.wait();
         let state = self.state.share();
-        state.value.as_ref().expect("value was moved")
+        state.value.read()
     }
 }
 
@@ -101,8 +143,8 @@ impl<'t, T> Future<'t, T> {
     pub fn take(self: Future<'t, T>) -> T {
         self.wait();
         let mut state = self.state.lock();
-        let val = state.as_mut().and_then(|state| state.value.take());
-        val.expect("value was moved")
+        state.as_mut().expect("value already shared")
+            .value.take()
     }
 
     pub fn apply<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
@@ -134,7 +176,7 @@ impl<'t, T> Future<'t, T> {
     {
         let boxed = Box::new(f);
         let mut guard = self.state.lock();
-        if guard.is_none() || guard.as_ref().unwrap().value.is_some() {
+        if guard.is_none() || !guard.as_ref().unwrap().value.is_empty() {
             drop(guard);
             FnBox::call_box(boxed, (self.clone(),));
         } else {
@@ -147,7 +189,7 @@ impl<'t, T> Future<'t, T> {
             match self.state.lock() {
                 None => {None},
                 Some(ref mut locked) => {
-                    if locked.ready_event.is_none() && locked.value.is_none() {
+                    if locked.ready_event.is_none() && locked.value.is_empty() {
                         let event = Arc::new(Event::new());
                         locked.ready_event = Option::Some(event.clone());
                         Some(event)
