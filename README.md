@@ -1,10 +1,10 @@
-### Future
+### Threading
 
-This library is my attempt to implement [arcadia](https://yandex.com/company/) futures in Rust.
+This library is my attempt to implement [arcadia](https://yandex.com/company/) threading primitives in Rust.
 
-Mapping from future.rs entities and methods to arcadia Nthreading.
+Mapping from threading entities and methods to arcadia Nthreading.
 
-future | Arcadia
+threading | Arcadia
 --------|-------
 Future | TFuture
 Future::new | MakeFuture
