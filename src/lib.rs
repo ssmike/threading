@@ -5,7 +5,7 @@ pub mod future;
 pub mod async;
 pub mod event;
 
-mod spinlock;
+pub mod spinlock;
 
 #[cfg(test)]
 mod tests;

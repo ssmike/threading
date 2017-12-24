@@ -2,6 +2,7 @@ use std::sync::atomic::{Ordering, AtomicBool};
 use std::ops::{DerefMut, Deref};
 use std::cell::UnsafeCell;
 use std::option::Option;
+use std::marker::PhantomData;
 use std::mem;
 
 #[derive(Default)]
@@ -11,11 +12,12 @@ pub struct Spinlock<T> {
     read_only: AtomicBool
 }
 
-unsafe impl<T: Send + Sync> Sync for Spinlock<T> {}
+unsafe impl<T: Send> Sync for Spinlock<T> {} //we don't allow to share() !Sync values
 unsafe impl<T: Send> Send for Spinlock<T> {}
 
 pub struct SpinlockGuard<'t, T: 't> {
     parent: &'t Spinlock<T>,
+    _marker: PhantomData<&'t mut T>
 }
 
 impl<'t, T: 't> Drop for SpinlockGuard<'t, T> {
@@ -62,12 +64,14 @@ impl<T> Spinlock<T> {
 
     pub fn lock<'t>(self: &'t Spinlock<T>) -> Option<SpinlockGuard<'t, T>> {
         if self.take() {
-            Some(SpinlockGuard{parent: self})
+            Some(SpinlockGuard{parent: self, _marker: PhantomData})
         } else {
             None
         }
     }
+}
 
+impl<T: Sync> Spinlock<T> {
     pub fn share(self: &Spinlock<T>) -> &T {
         if !self.read_only() {
             self.take();
@@ -76,4 +80,3 @@ impl<T> Spinlock<T> {
         unsafe {mem::transmute(self.data.get())}
     }
 }
-

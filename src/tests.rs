@@ -9,6 +9,16 @@ use spinlock::Spinlock;
 use std::rc::Rc;
 use std::cell::RefCell;
 
+#[test]
+fn check_spinlock() {
+    let s = Spinlock::new(RefCell::new(5));
+    let l = s.lock().unwrap();
+    enter(|scope| {
+        scope.spawn(move || { //refcell isn't sync, so we can't share reference(but can move)
+            *l.borrow_mut() = 6;
+        });
+    });
+}
 
 
 #[test]

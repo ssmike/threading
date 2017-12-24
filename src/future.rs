@@ -73,10 +73,6 @@ impl<'t, T> Promise<'t, T> {
     }
 }
 
-//It's safe to Send non-sync values because user can't deref Future<T: !Sync>
-unsafe impl<'t, T: Send> Send for Future<'t, T> {}
-unsafe impl<'t, T: Send> Send for Promise<'t, T> {}
-
 impl<'t, T> Deref for Future<'t, T>
     where T: Sync
 {

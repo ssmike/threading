@@ -30,7 +30,7 @@ impl<'t> DeferScope<'t> {
 
     pub fn async<Func, R>(self: &DeferScope<'t>, f: Func) -> Future<'t, R>
         where Func: 't + Send + FnOnce() -> R,
-              R: Sync + Send
+              R: Send
     {
         let (promise, future) = Promise::new();
         self.spawn(move || {
@@ -62,7 +62,7 @@ pub fn enter<'t, Func, R>(f: Func) -> R
 
 pub fn async<Func, R>(f: Func) -> Future<'static, R>
     where Func: 'static + Send + FnOnce() -> R,
-          R: 'static + Send + Sync
+          R: 'static + Send
 {
     let (promise, future) = Promise::new();
     thread::spawn(move || {
