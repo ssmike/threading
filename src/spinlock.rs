@@ -20,7 +20,7 @@ pub struct SpinlockGuard<'t, T: 't> {
 
 impl<'t, T: 't> Drop for SpinlockGuard<'t, T> {
     fn drop(self: &mut SpinlockGuard<'t, T>) {
-        self.parent.locked.store(false, Ordering::SeqCst);
+        self.parent.locked.store(false, Ordering::Release);
     }
 }
 
@@ -48,11 +48,11 @@ impl<T> Spinlock<T> {
     }
 
     fn read_only(self: &Spinlock<T>) -> bool {
-        self.read_only.load(Ordering::SeqCst)
+        self.read_only.load(Ordering::Acquire)
     }
 
     fn take(self: &Spinlock<T>) -> bool {
-        while !self.locked.compare_and_swap(false, true, Ordering::SeqCst) {
+        while !self.locked.compare_and_swap(false, true, Ordering::Acquire) {
             if self.read_only() {
                 return false;
             }
@@ -71,7 +71,7 @@ impl<T> Spinlock<T> {
     pub fn share(self: &Spinlock<T>) -> &T {
         if !self.read_only() {
             self.take();
-            self.read_only.store(true, Ordering::SeqCst)
+            self.read_only.store(true, Ordering::Relaxed)
         }
         unsafe {mem::transmute(self.data.get())}
     }

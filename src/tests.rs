@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 
+
 #[test]
 fn check_single() {
     let (promise, future) = Promise::new();
@@ -122,16 +123,16 @@ fn check_wait_all() {
     let f1 = {
         let cnt = cnt.clone();
         async(move || {
-            thread::sleep(time::Duration::from_millis(2));
-            cnt.fetch_add(1, Ordering::SeqCst);
+            thread::sleep(time::Duration::from_millis(40));
+            cnt.fetch_add(1, Ordering::Relaxed);
         })
     };
     let f2 = {
         let cnt = cnt.clone();
         async(move || {
             thread::sleep(time::Duration::from_millis(2));
-            cnt.fetch_add(1, Ordering::SeqCst);
+            cnt.fetch_add(1, Ordering::Relaxed);
         })
     };
-    wait_all(vec![f1, f2].into_iter()).apply(move |_| assert_eq!(cnt.load(Ordering::SeqCst), 2));
+    wait_all(vec![f1, f2].into_iter()).apply(move |_| assert_eq!(cnt.load(Ordering::SeqCst), 2)).take();
 }
