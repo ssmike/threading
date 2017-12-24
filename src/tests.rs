@@ -144,5 +144,5 @@ fn check_wait_all() {
             cnt.fetch_add(1, Ordering::Relaxed);
         })
     };
-    wait_all(vec![f1, f2].into_iter()).apply(move |_| assert_eq!(cnt.load(Ordering::SeqCst), 2)).take();
+    wait_all(vec![f1, f2].iter()).apply(move |_| assert_eq!(cnt.load(Ordering::SeqCst), 2)).take();
 }

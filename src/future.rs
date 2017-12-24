@@ -186,8 +186,9 @@ impl<F> Drop for Waiter<F>
     }
 }
 
-pub fn wait_all<'t, T, I>(i: I) -> Future<'t, ()>
-    where I: Iterator<Item = Future<'t, T>>,
+pub fn wait_all<'i, 't, T, I>(i: I) -> Future<'t, ()>
+    where I: Iterator<Item = &'i Future<'t, T>>,
+          't : 'i,
           T: 't
 {
     let (promise, future) = Promise::new();
@@ -202,8 +203,9 @@ pub fn wait_all<'t, T, I>(i: I) -> Future<'t, ()>
     future
 }
 
-pub fn wait_any<'t, T, I>(i: I) -> Future<'t, ()>
-    where I: Iterator<Item = Future<'t, T>>,
+pub fn wait_any<'i, 't, T, I>(i: I) -> Future<'t, ()>
+    where I: Iterator<Item = &'i Future<'t, T>>,
+          't : 'i,
           T: 't
 {
     let (promise, future) = Promise::new();
