@@ -7,20 +7,38 @@ use std::thread;
 use std::time;
 use spinlock::Spinlock;
 use std::rc::Rc;
+use std::cell::RefCell;
 
-//#[test]
-//fn check() {
-//    let (promise, future) = Promise::new();
-//    thread::spawn(move || {
-//        promise.set(Rc::new(5));
-//    });
-//}
 
 #[test]
 fn check_single() {
     let (promise, future) = Promise::new();
     promise.set(2);
     assert_eq!(*future, 2);
+}
+
+#[test]
+fn check_rc() {
+    let (promise, future) = Promise::new();
+    //thread::spawn(move || {
+    //    promise.set(Rc::new(5));// such promises aren't send
+    //});
+    promise.set(Rc::new(5));
+    future.apply(|future| {future.take();});
+    //thread::spawn(move || {
+    //    future.apply(|future| {future.take();})// ... and futures
+    //});
+}
+
+
+#[test]
+fn check_refcell() {
+    let (promise, future) = Promise::new();
+    thread::spawn(move || {
+        promise.set(RefCell::new(4)); // but for send values futures and promises are send
+    });
+    //*future; // But we can't dereference such futures.
+    assert_eq!(future.take().into_inner(), 4);
 }
 
 #[test]

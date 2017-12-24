@@ -73,7 +73,13 @@ impl<'t, T> Promise<'t, T> {
     }
 }
 
-impl<'t, T> Deref for Future<'t, T> {
+//It's safe to Send non-sync values because user can't deref Future<T: !Sync>
+unsafe impl<'t, T: Send> Send for Future<'t, T> {}
+unsafe impl<'t, T: Send> Send for Promise<'t, T> {}
+
+impl<'t, T> Deref for Future<'t, T>
+    where T: Sync
+{
     type Target = T;
 
     fn deref(self: &Future<'t, T>) -> &T {
@@ -104,7 +110,7 @@ impl<'t, T> Future<'t, T> {
     }
 
     pub fn apply<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
-        where R: 't + Send + Sync,
+        where R: 't + Send,
               Func: 't + FnOnce(Future<'t, T>) -> R + Send
     {
         let (promise, future) = Promise::new();
@@ -116,7 +122,7 @@ impl<'t, T> Future<'t, T> {
 
     pub fn then<R, Func>(self: &Future<'t, T>, f: Func) -> Future<'t, R>
         where Func: 't + FnOnce(Future<'t, T>) -> Future<'t, R> + Send,
-              R: 't + Send + Sync
+              R: 't + Send
     {
         let (promise, future) = Promise::new();
         self.subscribe(move |future| {
