@@ -8,8 +8,8 @@ threading | Arcadia
 --------|-------
 Future | TFuture
 Future::new | MakeFuture
-Future::apply/then | TFuture::Apply
-Future::deref | TFuture::GetValueSync
+Future/SharedFuture::apply/then | TFuture::Apply
+SharedFuture::get | TFuture::GetValueSync
 Future::take | TFuture::ExtractValueSync
 Promise | TPromise
 Promise::new | NewPromise + TPromise::GetFuture

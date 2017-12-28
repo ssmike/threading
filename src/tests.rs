@@ -25,7 +25,7 @@ fn check_spinlock() {
 fn check_single() {
     let (promise, future) = Promise::new();
     promise.set(2);
-    assert_eq!(*future, 2);
+    assert_eq!(future.take(), 2);
 }
 
 #[test]
@@ -35,9 +35,9 @@ fn check_rc() {
     //    promise.set(Rc::new(5));// such promises aren't send
     //});
     promise.set(Rc::new(5));
-    future.apply(|future| {future.take();});
+    future.apply(|_| {});
     //thread::spawn(move || {
-    //    future.apply(|future| {future.take();})// ... and futures
+    //    future.apply(|_| {})// ... and futures
     //});
 }
 
@@ -60,7 +60,7 @@ fn check_work() {
         let (promise, future) = Promise::<i32>::new();
         let tx = tx.clone();
         future.apply(move |x| {
-            tx.send(*x).unwrap();
+            tx.send(x).unwrap();
         });
         promise
     };
@@ -75,7 +75,7 @@ fn check_scoped() {
     let mut x = 5;
     enter(|scope| {
         assert_eq!(x, 5);
-        let mut y = 7;
+        let y = 7;
         scope.spawn(|| {
             //wouldn't compile, should outlive scope
             //assert_eq!(y, 2);
@@ -93,7 +93,9 @@ fn check_get() {
     thread::spawn(move || {
         promise.set(2 + 2);
     });
-    assert_eq!(*future, 4);
+    let future = future.share();
+    assert_eq!(*future.get(), 4);
+    assert_eq!(*future.clone().get(), 4);
 }
 
 #[test]
@@ -102,7 +104,7 @@ fn check_static_async() {
         thread::sleep(time::Duration::from_millis(4));
         2 + 2
     });
-    assert_eq!(*r, 4);
+    assert_eq!(r.take(), 4);
 }
 
 #[test]
@@ -118,11 +120,12 @@ fn check_asyncs() {
             x
         }).apply(|t| {
             thread::sleep(time::Duration::from_millis(4));
-            println!("{}", *t);
-            *t + arr[2]
+            println!("{}", t);
+            t + arr[2]
         });
-        assert_eq!(*res1, *res2);
-        *res1
+        let res1 = res1.share();
+        assert_eq!(*res1.get(), res2.take());
+        *res1.get()
     });
     assert_eq!(sm, res1);
 }
