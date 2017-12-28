@@ -1,4 +1,4 @@
-### Threading
+### Threading [![Build Status](https://travis-ci.org/ssmike/threading.svg?branch=master)](https://travis-ci.org/ssmike/threading)
 
 This library is my attempt to implement [arcadia](https://yandex.com/company/) threading primitives in Rust.
 
