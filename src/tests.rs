@@ -8,6 +8,7 @@ use std::time;
 use spinlock::Spinlock;
 use std::rc::Rc;
 use std::cell::RefCell;
+use atom::Atom;
 
 #[test]
 fn check_spinlock() {
@@ -148,4 +149,36 @@ fn check_wait_all() {
         })
     };
     wait_all(vec![f1, f2].iter()).apply(move |_| assert_eq!(cnt.load(Ordering::SeqCst), 2)).take();
+}
+
+#[test]
+fn check_hswap() {
+    let x = Atom::<i64>::new(5);
+    enter(|scope| {
+        scope.async(|| {
+            for i in 1..300 {
+                let z = x.load();
+                thread::sleep(time::Duration::from_millis(15));
+                x.store_val(i);
+                if *z % 100 == 0 {
+                    println!("{}", *z);
+                }
+            }
+        });
+        scope.async(|| {
+            for i in 1..300 {
+                let z = x.load();
+                thread::sleep(time::Duration::from_millis(15));
+                x.store_val(i);
+                if *z % 100 == 0 {
+                    println!("{}", *z);
+                }
+            }
+        });
+        scope.async(|| {
+            for i in 1..400 {
+                x.store_val(i);
+            }
+        });
+    })
 }

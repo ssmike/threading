@@ -20,6 +20,6 @@ Event::signal | TManualEvent::Signal
 async/DeferScope::async | TLegacyFuture
 wait_all | WaitAll
 wait_any | WaitAny
-
+Atom | THotSwap
 
 Mimicking ugly enterprise interfaces was not priority, so there are no GetValue and Promises could be set only once.

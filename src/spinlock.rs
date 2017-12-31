@@ -1,4 +1,4 @@
-use std::sync::atomic::{Ordering, AtomicBool};
+use std::sync::atomic::{Ordering, AtomicBool, AtomicI16};
 use std::ops::{DerefMut, Deref};
 use std::cell::UnsafeCell;
 use std::option::Option;
@@ -80,3 +80,88 @@ impl<T: Sync> Spinlock<T> {
         unsafe {mem::transmute(self.data.get())}
     }
 }
+
+pub struct SpinRWLock<T> {
+    data: UnsafeCell<T>,
+    readers: AtomicI16,
+    write: AtomicBool
+}
+
+unsafe impl<T: Send + Sync> Sync for SpinRWLock<T> {}
+unsafe impl<T: Send> Send for SpinRWLock<T> {}
+
+pub struct SpinReadGuard<'t, T: 't> {
+    parent: &'t SpinRWLock<T>,
+    _marker: PhantomData<&'t T>
+}
+
+impl<'t, T: 't> Deref for SpinReadGuard<'t, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe {mem::transmute(self.parent.data.get())}
+    }
+}
+
+pub struct SpinWriteGuard<'t, T: 't> {
+    parent: &'t SpinRWLock<T>,
+    _marker: PhantomData<&'t mut T>
+}
+
+impl<'t, T: 't> Deref for SpinWriteGuard<'t, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe {mem::transmute(self.parent.data.get())}
+    }
+}
+
+impl<'t, T: 't> DerefMut for SpinWriteGuard<'t, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe {mem::transmute(self.parent.data.get())}
+    }
+}
+
+impl<T> SpinRWLock<T> {
+    pub fn new(val: T) -> Self {
+        SpinRWLock {
+            data: UnsafeCell::new(val),
+            readers: AtomicI16::new(0),
+            write: AtomicBool::new(false)
+        }
+    }
+
+    pub fn read<'t>(&'t self) -> SpinReadGuard<'t, T> {
+        loop {
+            self.readers.fetch_add(1, Ordering::SeqCst);
+            if !self.write.load(Ordering::SeqCst) { break; }
+            self.readers.fetch_sub(1, Ordering::SeqCst);
+        }
+        SpinReadGuard {
+            parent: self,
+            _marker: PhantomData
+        }
+    }
+
+    pub fn write<'t>(&'t self) -> SpinWriteGuard<'t, T> {
+        while !self.write.compare_and_swap(false, true, Ordering::SeqCst) {}
+        while self.readers.load(Ordering::SeqCst) != 0 {}
+        SpinWriteGuard {
+            parent: self,
+            _marker: PhantomData
+        }
+    }
+}
+
+impl<'t, T: 't> Drop for SpinWriteGuard<'t, T> {
+    fn drop(&mut self) {
+        self.parent.write.store(false, Ordering::SeqCst);
+    }
+}
+
+impl<'t, T: 't> Drop for SpinReadGuard<'t, T> {
+    fn drop(&mut self) {
+        self.parent.readers.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
