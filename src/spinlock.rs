@@ -133,9 +133,11 @@ impl<T> SpinRWLock<T> {
 
     pub fn read<'t>(&'t self) -> SpinReadGuard<'t, T> {
         loop {
-            self.readers.fetch_add(1, Ordering::SeqCst);
-            if !self.write.load(Ordering::SeqCst) { break; }
-            self.readers.fetch_sub(1, Ordering::SeqCst);
+            if !self.write.load(Ordering::SeqCst) {
+                self.readers.fetch_add(1, Ordering::SeqCst);
+                if !self.write.load(Ordering::SeqCst) { break; }
+                self.readers.fetch_sub(1, Ordering::SeqCst);
+            }
         }
         SpinReadGuard {
             parent: self,
