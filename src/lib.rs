@@ -1,5 +1,4 @@
-#![feature(integer_atomics)]
-#![feature(fnbox)]
+#![feature(fn_traits)]
 
 pub mod future;
 pub mod async;

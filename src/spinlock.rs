@@ -1,7 +1,6 @@
 use std::sync::atomic::{Ordering, AtomicBool, AtomicI16};
 use std::ops::{DerefMut, Deref};
 use std::cell::UnsafeCell;
-use std::option::Option;
 use std::marker::PhantomData;
 use std::mem;
 
@@ -54,7 +53,7 @@ impl<T> Spinlock<T> {
     }
 
     fn take(self: &Spinlock<T>) -> bool {
-        while !self.locked.compare_and_swap(false, true, Ordering::Acquire) {
+        while !self.locked.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
             if self.read_only() {
                 return false;
             }
@@ -75,7 +74,7 @@ impl<T: Sync> Spinlock<T> {
     pub fn share(self: &Spinlock<T>) -> &T {
         if !self.read_only() {
             self.take();
-            self.read_only.store(true, Ordering::Relaxed)
+            self.read_only.store(true, Ordering::Release)
         }
         unsafe {mem::transmute(self.data.get())}
     }
@@ -144,8 +143,8 @@ impl<T> SpinRWLock<T> {
     }
 
     pub fn write<'t>(&'t self) -> SpinWriteGuard<'t, T> {
-        while !self.write.compare_and_swap(false, true, Ordering::SeqCst) {}
-        while self.readers.load(Ordering::SeqCst) != 0 {}
+        while !self.write.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {}
+        while self.readers.load(Ordering::Acquire) != 0 {}
         SpinWriteGuard {
             parent: self,
             _marker: PhantomData
@@ -155,13 +154,13 @@ impl<T> SpinRWLock<T> {
 
 impl<'t, T: 't> Drop for SpinWriteGuard<'t, T> {
     fn drop(&mut self) {
-        self.parent.write.store(false, Ordering::SeqCst);
+        self.parent.write.store(false, Ordering::Release);
     }
 }
 
 impl<'t, T: 't> Drop for SpinReadGuard<'t, T> {
     fn drop(&mut self) {
-        self.parent.readers.fetch_sub(1, Ordering::SeqCst);
+        self.parent.readers.fetch_sub(1, Ordering::Release);
     }
 }
 

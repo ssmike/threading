@@ -1,12 +1,11 @@
 use std::sync::Mutex;
 use std::marker::PhantomData;
-use std::boxed::{Box, FnBox};
 use future::{Future, Promise};
 use std::thread;
 use std::mem;
 
 pub struct DeferScope<'t> {
-    to_run: Mutex<Vec<Box<'t + FnBox() -> ()>>>,
+    to_run: Mutex<Vec<Box<dyn 't + FnOnce() -> ()>>>,
     _marker: PhantomData<&'t ()>
 }
 
@@ -18,10 +17,10 @@ impl<'t> DeferScope<'t> {
     pub fn spawn<Func>(self: &DeferScope<'t>, f: Func)
         where Func: 't + Send + FnOnce() -> ()
     {
-        let to_send: Box<'t + FnBox() -> () + Send> = Box::new(f);
-        let to_send: Box<'static + FnBox() -> () + Send> = unsafe{mem::transmute(to_send)};
+        let to_send: Box<dyn 't + FnOnce() -> () + Send> = Box::new(f);
+        let to_send: Box<dyn 'static + FnOnce() -> () + Send> = unsafe{mem::transmute(to_send)};
         let to_join = thread::spawn(move || {
-            FnBox::call_box(to_send, ());
+            Box::call_once(to_send, ());
         });
         self.defer(move || {
             to_join.join().unwrap();
@@ -45,7 +44,7 @@ impl<'t> Drop for DeferScope<'t> {
         let mut callbacks = Vec::new();
         mem::swap(&mut callbacks, &mut self.to_run.lock().unwrap());
         callbacks.into_iter().for_each(|x| {
-            FnBox::call_box(x, ());
+            Box::call_once(x, ());
         });
     }
 }
