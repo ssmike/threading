@@ -145,8 +145,8 @@ impl<T> SpinRWLock<T> {
     }
 
     pub fn write<'t>(&'t self) -> SpinWriteGuard<'t, T> {
-        while !self.write.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {}
-        while self.readers.load(Ordering::Acquire) != 0 {}
+        while !self.write.compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {}
+        while self.readers.load(Ordering::SeqCst) != 0 {}
         SpinWriteGuard {
             parent: self,
             _marker: PhantomData

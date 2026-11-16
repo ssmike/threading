@@ -29,7 +29,7 @@ impl<T> Atom<T> {
     }
 
     pub fn store(&self, val: Arc<T>) {
-        let _ = self.write_guard.lock();
+        let _guard = self.write_guard.lock();
         let mut guard = self.data[(self.get_idx()+1)%2].write();
         let mut wrapped = Some(val);
         mem::swap(&mut wrapped, &mut *guard);
