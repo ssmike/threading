@@ -1,7 +1,4 @@
-use std::option::Option;
-use std::boxed::{Box, FnBox};
 use std::sync::{Arc, Mutex};
-use std::iter::Iterator;
 use spinlock::Spinlock;
 use event::Event;
 use std::mem;
@@ -52,7 +49,7 @@ struct FutureState<'t, T>
     where T: 't
 {
     value: FutureValue<T>,
-    callbacks: Vec<Box<'t + FnBox(&StateHolder<'t, T>) -> () + Send>>,
+    callbacks: Vec<Box<dyn 't + FnOnce(&StateHolder<'t, T>) -> () + Send>>,
     ready_event: Option<Arc<Event>>
 }
 
@@ -115,7 +112,7 @@ impl<'t, T> StateHolder<'t, T> {
             vec
         };
         callbacks.into_iter().for_each(|f| {
-            FnBox::call_box(f, (self,));
+            Box::call_once(f, (self,));
         });
     }
 
@@ -151,7 +148,7 @@ impl<'t, T> StateHolder<'t, T> {
         let mut guard = self.state.lock();
         if guard.is_none() || !guard.as_ref().unwrap().value.is_empty() {
             drop(guard);
-            FnBox::call_box(boxed, (self,));
+            Box::call_once(boxed, (self,));
         } else {
             guard.as_mut().unwrap().callbacks.push(boxed);
         }
@@ -287,13 +284,13 @@ impl<'t, T: 't + Sync> SharedFuture<'t, T> {
 
 #[derive(Clone)]
 struct Waiter<F>
-    where F: FnBox() -> ()
+    where F: FnOnce() -> ()
 {
     on_destroy: Option<Box<F>>
 }
 
 impl<F> Waiter<F>
-    where F: FnBox() -> ()
+    where F: FnOnce() -> ()
 {
     fn new(f: F) -> Waiter<F> {
         Waiter {
@@ -303,10 +300,10 @@ impl<F> Waiter<F>
 }
 
 impl<F> Drop for Waiter<F>
-    where F: FnBox() -> ()
+    where F: FnOnce() -> ()
 {
     fn drop(self: &mut Waiter<F>) {
-        FnBox::call_box(self.on_destroy.take().unwrap(), ())
+        Box::call_once(self.on_destroy.take().unwrap(), ())
     }
 }
 

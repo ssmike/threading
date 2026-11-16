@@ -27,13 +27,13 @@ impl<T> Atom<T> {
     pub fn store_val(&self, val: T) {
         self.store(Arc::new(val))
     }
-    
+
     pub fn store(&self, val: Arc<T>) {
         let _ = self.write_guard.lock();
-        self.switch();
-        let mut guard = self.data[self.get_idx()].write();
+        let mut guard = self.data[(self.get_idx()+1)%2].write();
         let mut wrapped = Some(val);
         mem::swap(&mut wrapped, &mut *guard);
+        self.switch();
     }
 
     fn get_idx(&self) -> usize {
